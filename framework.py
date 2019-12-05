@@ -3,8 +3,14 @@ import model
 
 
 class CycleGAN:
-    def __init__(self, batch_size=64, gen_steps=1, critic_steps=10,
-                 gp_weight=10, cycle_weight=10):
+    def __init__(
+        self,
+        batch_size=64,
+        gen_steps=1,
+        critic_steps=10,
+        gp_weight=10,
+        cycle_weight=10,
+    ):
         self.batch_size = batch_size
         self.gen_steps = gen_steps
         self.critic_steps = critic_steps
@@ -22,17 +28,17 @@ class CycleGAN:
         self.critic_x_optimizer = None
         self.critic_y_optimizer = None
 
-    def build(self, gen_lr=1e-4, critic_lr=1e-4):
+    def build(self, image_size, gen_lr=1e-4, critic_lr=1e-4):
         # summary writer for tensorboard
         self.writer = tf.summary.create_file_writer("summary")
 
         # generator keras models
-        self.generator_g = model.build_generator()
-        self.generator_f = model.build_generator()
+        self.generator_g = model.build_generator(image_size)
+        self.generator_f = model.build_generator(image_size)
 
         # critic keras models
-        self.critic_x = model.build_critic()
-        self.critic_y = model.build_critic()
+        self.critic_x = model.build_critic(image_size)
+        self.critic_y = model.build_critic(image_size)
 
         # optimizers for generators and critic
         # Due to the Generator and Critic loss influencing each other the loss phase space
@@ -41,10 +47,18 @@ class CycleGAN:
         # momentum parameters beta_1 and beta_2 are set pretty low,
         # usually: beta_1=0.9, beta_2=0.999
         # The learning rates should also be chosen relatively small (<1e-4) because of this
-        self.gen_g_optimizer = tf.optimizers.Adam(gen_lr, beta_1=0.5, beta_2=0.9)
-        self.gen_f_optimizer = tf.optimizers.Adam(gen_lr, beta_1=0.5, beta_2=0.9)
-        self.critic_x_optimizer = tf.optimizers.Adam(critic_lr, beta_1=0.5, beta_2=0.9)
-        self.critic_y_optimizer = tf.optimizers.Adam(critic_lr, beta_1=0.5, beta_2=0.9)
+        self.gen_g_optimizer = tf.optimizers.Adam(
+            gen_lr, beta_1=0.5, beta_2=0.9
+        )
+        self.gen_f_optimizer = tf.optimizers.Adam(
+            gen_lr, beta_1=0.5, beta_2=0.9
+        )
+        self.critic_x_optimizer = tf.optimizers.Adam(
+            critic_lr, beta_1=0.5, beta_2=0.9
+        )
+        self.critic_y_optimizer = tf.optimizers.Adam(
+            critic_lr, beta_1=0.5, beta_2=0.9
+        )
 
     def summary(self, tag, value, step):
         # write a scalar value (loss) to the summary file
@@ -73,14 +87,22 @@ class CycleGAN:
         # take random points on a virtual connection between the generated and the real sample
         # and enfore the critic gradient to be 1 on this point
         critic = self.critic_x if direction == "x" else self.critic_y
-        tag = "y2x/gradient_penalty" if direction == "x" else "x2y/gradient_penalty"
+        tag = (
+            "y2x/gradient_penalty"
+            if direction == "x"
+            else "x2y/gradient_penalty"
+        )
 
-        epsilon = tf.random.uniform([self.batch_size, 1, 1, 1, 1], minval=0, maxval=1)
+        epsilon = tf.random.uniform(
+            [self.batch_size, 1, 1, 1, 1], minval=0, maxval=1
+        )
         averaged_batch = epsilon * real + (1 - epsilon) * fake
         averaged_batch_out = critic(averaged_batch, training=True)
         gradients = tf.gradients(averaged_batch_out, averaged_batch)[0]
-        normed_gradients = tf.sqrt(tf.reduce_sum(tf.square(gradients), axis=[1, 2]))
-        loss = self.gp_weight * tf.reduce_mean((normed_gradients - 1)**2)
+        normed_gradients = tf.sqrt(
+            tf.reduce_sum(tf.square(gradients), axis=[1, 2])
+        )
+        loss = self.gp_weight * tf.reduce_mean((normed_gradients - 1) ** 2)
 
         if step % self.critic_steps < 1:
             self.summary(tag, loss, step)
@@ -106,9 +128,15 @@ class CycleGAN:
             fake_y_out = self.critic_y(fake_y, training=True)
 
             gen_loss_g = self.generator_loss(fake_y_out, "x2y", step)
-            cycle_loss_x = self.cycle_consistency_loss(real_x, reconstructed_x, "x2x", step)
-            critic_y_loss = self.critic_loss(real_y_out, fake_y_out, "x2y", step)
-            critic_y_loss += self.gradient_penalty_loss(fake_y, real_y, "y", step)
+            cycle_loss_x = self.cycle_consistency_loss(
+                real_x, reconstructed_x, "x2x", step
+            )
+            critic_y_loss = self.critic_loss(
+                real_y_out, fake_y_out, "x2y", step
+            )
+            critic_y_loss += self.gradient_penalty_loss(
+                fake_y, real_y, "y", step
+            )
 
             # backward pass
             fake_x = self.generator_f(real_y, training=True)
@@ -117,9 +145,15 @@ class CycleGAN:
             fake_x_out = self.critic_x(fake_x, training=True)
 
             gen_loss_f = self.generator_loss(fake_x_out, "y2x", step)
-            cycle_loss_y = self.cycle_consistency_loss(real_y, reconstructed_y, "y2y", step)
-            critic_x_loss = self.critic_loss(real_x_out, fake_x_out, "y2x", step)
-            critic_x_loss += self.gradient_penalty_loss(fake_x, real_x, "x", step)
+            cycle_loss_y = self.cycle_consistency_loss(
+                real_y, reconstructed_y, "y2y", step
+            )
+            critic_x_loss = self.critic_loss(
+                real_x_out, fake_x_out, "y2x", step
+            )
+            critic_x_loss += self.gradient_penalty_loss(
+                fake_x, real_x, "x", step
+            )
 
             # add total cycle consistency loss to both generator losses
             total_cycle_loss = cycle_loss_x + cycle_loss_y
@@ -128,31 +162,41 @@ class CycleGAN:
 
         # train both generators every X critic steps
         if step % self.critic_steps < 1:
-            gen_g_gradients = tape.gradient(total_gen_g_loss,
-                                            self.generator_g.trainable_variables)
-            gen_f_gradients = tape.gradient(total_gen_f_loss,
-                                            self.generator_f.trainable_variables)
-            self.gen_g_optimizer.apply_gradients(zip(gen_g_gradients,
-                                                     self.generator_g.trainable_variables))
-            self.gen_f_optimizer.apply_gradients(zip(gen_f_gradients,
-                                                     self.generator_f.trainable_variables))
+            gen_g_gradients = tape.gradient(
+                total_gen_g_loss, self.generator_g.trainable_variables
+            )
+            gen_f_gradients = tape.gradient(
+                total_gen_f_loss, self.generator_f.trainable_variables
+            )
+            self.gen_g_optimizer.apply_gradients(
+                zip(gen_g_gradients, self.generator_g.trainable_variables)
+            )
+            self.gen_f_optimizer.apply_gradients(
+                zip(gen_f_gradients, self.generator_f.trainable_variables)
+            )
 
         # train both critics
-        critic_x_gradients = tape.gradient(critic_x_loss,
-                                           self.critic_x.trainable_variables)
-        critic_y_gradients = tape.gradient(critic_y_loss,
-                                           self.critic_y.trainable_variables)
+        critic_x_gradients = tape.gradient(
+            critic_x_loss, self.critic_x.trainable_variables
+        )
+        critic_y_gradients = tape.gradient(
+            critic_y_loss, self.critic_y.trainable_variables
+        )
 
-        self.critic_x_optimizer.apply_gradients(zip(critic_x_gradients,
-                                                    self.critic_x.trainable_variables))
+        self.critic_x_optimizer.apply_gradients(
+            zip(critic_x_gradients, self.critic_x.trainable_variables)
+        )
 
-        self.critic_y_optimizer.apply_gradients(zip(critic_y_gradients,
-                                                    self.critic_y.trainable_variables))
+        self.critic_y_optimizer.apply_gradients(
+            zip(critic_y_gradients, self.critic_y.trainable_variables)
+        )
 
     def train(self, dataset_x, dataset_y, iterations):
         real_iterations = iterations * self.critic_steps
         zip_dataset = tf.data.Dataset.zip((dataset_x, dataset_y))
-        train_dataset = zip_dataset.batch(self.batch_size).prefetch(1).take(real_iterations)
+        train_dataset = (
+            zip_dataset.batch(self.batch_size).prefetch(1).take(real_iterations)
+        )
         for i, (data_x, data_y) in enumerate(train_dataset):
             step = tf.constant(i, dtype=tf.int64)
             self.train_step(data_x, data_y, step)
