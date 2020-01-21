@@ -195,8 +195,30 @@ class CycleGAN:
         real_iterations = iterations * self.critic_steps
         zip_dataset = tf.data.Dataset.zip((dataset_x, dataset_y))
         train_dataset = (
-            zip_dataset.batch(self.batch_size).prefetch(1).take(real_iterations)
+            zip_dataset.batch(self.batch_size).prefetch(3).take(real_iterations)
         )
         for i, (data_x, data_y) in enumerate(train_dataset):
             step = tf.constant(i, dtype=tf.int64)
             self.train_step(data_x, data_y, step)
+
+    def save(self):
+        self.generator_g.save("generator_g.h5")
+        self.generator_f.save("generator_f.h5")
+
+    def predict_fake_y(self, test_set_x):
+        for data_x in test_set_x.batch(1).prefetch(1):
+            yield self.generator_g(data_x)
+
+    def predict_reco_x(self, test_set_x):
+        for data_x in test_set_x.batch(1).prefetch(1):
+            fake_y = self.generator_g(data_x)
+            yield self.generator_f(fake_y)
+
+    def predict_fake_x(self, test_set_y):
+        for data_y in test_set_y.batch(1).prefetch(1):
+            yield self.generator_f(data_y)
+
+    def predict_reco_y(self, test_set_y):
+        for data_y in test_set_y.batch(1).prefetch(1):
+            fake_x = self.generator_g(data_y)
+            yield self.generator_g(fake_x)

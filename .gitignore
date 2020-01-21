@@ -2,3 +2,5 @@ data
 .vscode
 summary
 *.pyc
+images
+*.h5
